@@ -4,7 +4,7 @@ import type { ConversationDetail, Fact, Settings } from '../../shared/types.js'
 import { accomplishments, careGoal, nextStep, snippetFor } from '../../shared/cockpit.js'
 import { api } from '../api'
 import { useVoice } from '../useVoice'
-import { CallSurface } from './CallSurface'
+import { CallBar } from './CallBar'
 import { LiveTranscript } from './LiveTranscript'
 import { Cockpit } from './Cockpit'
 import { Insights } from './Insights'
@@ -35,6 +35,15 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
 
   const voice = useVoice(conversation.id, scheduleRefresh)
   const live = voice.status === 'listening' || voice.status === 'speaking' || voice.status === 'connecting'
+  const autoStarted = useRef(false)
+
+  // Starting a conversation starts the microphone. No second click needed.
+  useEffect(() => {
+    if (autoStarted.current) return
+    if (conversation.status === 'ended' || conversation.status === 'incomplete') return
+    autoStarted.current = true
+    void voice.start()
+  }, [conversation.id, conversation.status, voice.start])
 
   const goal = useMemo(() => careGoal(facts), [facts])
   const step = useMemo(() => nextStep(facts), [facts])
@@ -98,8 +107,10 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
     <header className="mb-7 flex flex-wrap items-end gap-5 border-b border-line pb-6">
       <button onClick={onExit} className="flex items-center gap-2 text-sm font-medium text-muted transition hover:text-teal"><ArrowLeft size={16}/> Back home</button>
       <div className="min-w-0 flex-1 sm:ml-4"><p className="eyebrow text-teal">{patient.subject === 'other' ? 'Family conversation' : 'Patient conversation'}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Take your time. I’m here.</h1><p className="mt-1 text-sm text-muted">We can take this one step at a time.</p></div>
+      <button onClick={() => setAdjusting(value => !value)} className="outline-control">{adjusting ? 'Done adjusting' : 'Adjust navigator'}</button>
       <div className="hidden items-center gap-2 rounded-full border border-line bg-white/60 px-3 py-2 text-xs text-muted sm:flex"><Clock3 size={14}/> Started {new Date(conversation.started_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</div>
     </header>
+    {adjusting && <div className="mb-5"><AdjustPanel settings={conversation.settings} onChange={adjust} /></div>}
     <div className="grid gap-6 xl:grid-cols-[minmax(0,440px)_1fr]">
       <div className="session-rail space-y-4">
         <div className="flex items-start justify-between gap-3 px-1">
@@ -114,17 +125,7 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
           </span>
         </div>
 
-        <CallSurface
-          voice={voice}
-          conversation={conversation}
-          navigatorName={navigatorName}
-          onTyped={sendTyped}
-          onEnd={onEnd}
-          onAdjust={() => setAdjusting(value => !value)}
-          adjusting={adjusting}
-        >
-          <AdjustPanel settings={conversation.settings} onChange={adjust} />
-        </CallSurface>
+        <CallBar voice={voice} conversation={conversation} navigatorName={navigatorName} onTyped={sendTyped} onEnd={onEnd} />
 
         <LiveTranscript turns={turns} live={live} navigatorName={navigatorName} snippets={snippets} />
       </div>

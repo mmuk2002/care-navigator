@@ -94,6 +94,11 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
       output.current = outputCtx
       playhead.current = outputCtx.currentTime
 
+      // Browsers can hand back a suspended context; resume both so capture and
+      // playback work immediately after the user starts the session.
+      if (inputCtx.state === 'suspended') await inputCtx.resume().catch(() => undefined)
+      if (outputCtx.state === 'suspended') await outputCtx.resume().catch(() => undefined)
+
       const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/voice?conversation=${encodeURIComponent(conversationId)}`)
       ws.binaryType = 'arraybuffer'
       socket.current = ws

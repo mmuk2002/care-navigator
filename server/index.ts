@@ -5,6 +5,7 @@ import middie from '@fastify/middie'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import type { AppEvent, CareContext, Settings } from '../shared/types.js'
 import { normalizeSettings } from '../shared/settings.js'
 import { memoryBlock, navigatorReply } from './persona.js'
@@ -227,8 +228,16 @@ if (production) {
     return reply.sendFile('index.html')
   })
 } else {
-  const vite = await createViteServer({ root, server: { middlewareMode: true }, appType: 'spa' })
+  // Custom mode prevents Vite's SPA fallback from swallowing /api requests.
+  // Fastify owns routing; Vite only transforms and serves frontend modules.
+  const vite = await createViteServer({ root, server: { middlewareMode: true }, appType: 'custom' })
   app.use(vite.middlewares)
+  app.setNotFoundHandler(async (request, reply) => {
+    if (request.url.startsWith('/api')) return reply.code(404).send({ error: 'not_found' })
+    const template = await readFile(join(root, 'index.html'), 'utf8')
+    const html = await vite.transformIndexHtml(request.url, template)
+    return reply.type('text/html').send(html)
+  })
 }
 
 async function requireVisitor(cookie: string | undefined, reply: { code: (status: number) => { send: (body: unknown) => void } }): Promise<string | null> {
