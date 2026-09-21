@@ -1,0 +1,157 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'closed' | 'error'
+
+interface Caption { speaker: 'user' | 'assistant'; text: string; final: boolean }
+
+function base64ToFloat32(base64: string): Float32Array<ArrayBuffer> {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  const view = new DataView(bytes.buffer)
+  const samples = new Float32Array(bytes.length / 2)
+  for (let i = 0; i < samples.length; i += 1) samples[i] = view.getInt16(i * 2, true) / 32768
+  return samples
+}
+
+/** Resample to 16 kHz and convert to signed 16-bit PCM, which Gemini Live expects. */
+function toPcm16(input: Float32Array, sourceRate: number): ArrayBuffer {
+  const ratio = sourceRate / 16000
+  const length = Math.max(1, Math.floor(input.length / ratio))
+  const buffer = new ArrayBuffer(length * 2)
+  const view = new DataView(buffer)
+  for (let i = 0; i < length; i += 1) {
+    const sample = input[Math.min(input.length - 1, Math.floor(i * ratio))] || 0
+    view.setInt16(i * 2, Math.max(-1, Math.min(1, sample)) * 0x7fff, true)
+  }
+  return buffer
+}
+
+export function useVoice(conversationId: string | null, onSavedTurn: () => void) {
+  const [status, setStatus] = useState<VoiceStatus>('idle')
+  const [captions, setCaptions] = useState<Caption[]>([])
+  const [notice, setNotice] = useState('')
+  const socket = useRef<WebSocket | null>(null)
+  const input = useRef<AudioContext | null>(null)
+  const output = useRef<AudioContext | null>(null)
+  const mic = useRef<MediaStream | null>(null)
+  const node = useRef<ScriptProcessorNode | null>(null)
+  const playhead = useRef(0)
+  const sources = useRef<AudioBufferSourceNode[]>([])
+  const saved = useRef(onSavedTurn)
+  saved.current = onSavedTurn
+
+  const stopAudio = useCallback(() => {
+    for (const source of sources.current) { try { source.stop() } catch { /* already stopped */ } }
+    sources.current = []
+    playhead.current = output.current?.currentTime || 0
+  }, [])
+
+  const teardown = useCallback(() => {
+    node.current?.disconnect()
+    node.current = null
+    mic.current?.getTracks().forEach(track => track.stop())
+    mic.current = null
+    void input.current?.close().catch(() => {})
+    input.current = null
+    void output.current?.close().catch(() => {})
+    output.current = null
+  }, [])
+
+  const stop = useCallback(() => {
+    socket.current?.close()
+    socket.current = null
+    teardown()
+    setStatus('closed')
+  }, [teardown])
+
+  const steer = useCallback((directive: string) => {
+    if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'steer', directive }))
+  }, [])
+
+  const start = useCallback(async () => {
+    if (!conversationId) return
+    setStatus('connecting')
+    setNotice('')
+    setCaptions([])
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
+      mic.current = stream
+      const inputCtx = new AudioContext()
+      input.current = inputCtx
+      const source = inputCtx.createMediaStreamSource(stream)
+      const processor = inputCtx.createScriptProcessor(4096, 1, 1)
+      node.current = processor
+      const sink = inputCtx.createGain()
+      sink.gain.value = 0
+      source.connect(processor)
+      processor.connect(sink)
+      sink.connect(inputCtx.destination)
+
+      const outputCtx = new AudioContext()
+      output.current = outputCtx
+      playhead.current = outputCtx.currentTime
+
+      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/voice?conversation=${encodeURIComponent(conversationId)}`)
+      ws.binaryType = 'arraybuffer'
+      socket.current = ws
+
+      processor.onaudioprocess = event => {
+        if (ws.readyState !== WebSocket.OPEN) return
+        ws.send(toPcm16(event.inputBuffer.getChannelData(0), inputCtx.sampleRate))
+      }
+
+      ws.onmessage = event => {
+        if (typeof event.data !== 'string') return
+        const message = JSON.parse(event.data) as { type: string; speaker?: 'user' | 'assistant'; text?: string; final?: boolean; data?: string; message?: string; reason?: string }
+        switch (message.type) {
+          case 'ready': setStatus('listening'); break
+          case 'listening': setStatus('listening'); break
+          case 'speaking': setStatus('speaking'); break
+          case 'interrupted': stopAudio(); setStatus('listening'); break
+          case 'transcript': {
+            const caption: Caption = { speaker: message.speaker || 'user', text: message.text || '', final: Boolean(message.final) }
+            setCaptions(current => {
+              const next = [...current]
+              const index = next.findIndex(item => item.speaker === caption.speaker && !item.final)
+              if (index >= 0) next[index] = caption
+              else next.push(caption)
+              return next.slice(-60)
+            })
+            if (caption.final && caption.speaker === 'user') saved.current()
+            break
+          }
+          case 'audio': {
+            const outputCtx = output.current
+            if (!outputCtx || !message.data) break
+            const samples = base64ToFloat32(message.data)
+            const buffer = outputCtx.createBuffer(1, samples.length, 24000)
+            buffer.copyToChannel(samples, 0)
+            const source = outputCtx.createBufferSource()
+            source.buffer = buffer
+            source.connect(outputCtx.destination)
+            playhead.current = Math.max(playhead.current, outputCtx.currentTime)
+            source.start(playhead.current)
+            playhead.current += buffer.duration
+            sources.current.push(source)
+            source.onended = () => { sources.current = sources.current.filter(item => item !== source) }
+            break
+          }
+          case 'notice': setNotice(message.message || ''); break
+          case 'error': setStatus('error'); setNotice(message.message || 'Voice failed'); break
+          case 'closed': setStatus('closed'); break
+        }
+      }
+      ws.onerror = () => { setStatus('error'); setNotice('The voice connection dropped.') }
+      ws.onclose = () => { teardown(); setStatus(current => (current === 'error' ? current : 'closed')) }
+    } catch (error) {
+      teardown()
+      setStatus('error')
+      setNotice(error instanceof Error ? error.message : 'Microphone unavailable')
+    }
+  }, [conversationId, stopAudio, teardown])
+
+  useEffect(() => () => { socket.current?.close(); teardown() }, [teardown])
+
+  return { status, captions, notice, start, stop, steer }
+}
