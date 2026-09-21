@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Turn } from '../shared/types.js'
-import { hasEvidence, ruleFacts } from '../server/analysis.js'
+import { hasEvidence, isAffirmation, reclassifyFact, ruleFacts } from '../server/analysis.js'
 import { joinTranscript } from '../server/gemini.js'
 
 function turn(text: string): Turn {
-  return { id: 't1', conversation_id: 'c1', speaker: 'user', text, seq: 1, interrupted: false, created_at: '' }
+  return { id: 't1', conversation_id: 'c1', speaker: 'user', text, seq: 1, interrupted: false, source_id: null, created_at: '' }
 }
 
 test('rule fallback tags a detail-rich sentence with several widgets', () => {
@@ -41,6 +41,27 @@ test('evidence check rejects a fabricated quote', () => {
 test('evidence check accepts a verbatim detail when the quote is missing', () => {
   const haystack = 'she can only do mornings'
   assert.equal(hasEvidence({ widget: 'transport', title: 'x', detail: 'only do mornings', quote: '', event_date: null }, haystack), true)
+})
+
+test('a time-of-day preference is reclassified out of appointment', () => {
+  const fact = { widget: 'appointment' as const, title: 'x', detail: 'Maria prefers afternoon appointments', quote: 'x', event_date: null }
+  assert.equal(reclassifyFact(fact).widget, 'preference')
+})
+
+test('a missing medication list is reclassified as a preparation item', () => {
+  const fact = { widget: 'medication' as const, title: 'x', detail: "we don't have an updated medication list", quote: 'x', event_date: null }
+  assert.equal(reclassifyFact(fact).widget, 'readiness')
+})
+
+test('a real medicine is left as a medication', () => {
+  const fact = { widget: 'medication' as const, title: 'x', detail: 'She takes a blood pressure pill', quote: 'x', event_date: null }
+  assert.equal(reclassifyFact(fact).widget, 'medication')
+})
+
+test('short confirmations are recognised', () => {
+  assert.equal(isAffirmation('Yeah, she said she can.'), true)
+  assert.equal(isAffirmation('Yes'), true)
+  assert.equal(isAffirmation('Actually the appointment got moved to Tuesday and Sarah cannot do Tuesdays'), false)
 })
 
 test('transcript pieces keep provider spacing at word boundaries', () => {

@@ -8,7 +8,8 @@ function fact(widget: Widget, detail: string, extra: Partial<Fact> = {}): Fact {
   counter += 1
   return {
     id: `f${counter}`, conversation_id: 'c1', widget, title: widget, detail,
-    status: 'reported', source_turn_id: 't1', source_quote: detail, event_date: null,
+    status: 'reported', level: null, priority: 'normal', certainty: 'reported',
+    source_turn_id: 't1', source_quote: detail, event_date: null,
     created_at: new Date(2026, 0, counter).toISOString(), ...extra,
   }
 }
@@ -31,12 +32,21 @@ test('an explicit next step is used when nothing else is pending', () => {
   assert.equal(nextStep(facts)?.text, "I'll call the pharmacy tomorrow about a refill")
 })
 
-test('an upcoming appointment takes priority for the next step', () => {
+test('an upcoming appointment shifts the next step to the remaining prep item', () => {
   const facts = [
     fact('referral', 'The referral was sent last week'),
     fact('appointment', 'The cardiology visit is booked for Thursday'),
   ]
-  assert.equal(nextStep(facts)?.text, 'Prepare for the visit')
+  assert.equal(nextStep(facts)?.text, 'Arrange transportation')
+})
+
+test('once transportation is confirmed the next step becomes visit preparation', () => {
+  const facts = [
+    fact('appointment', 'The cardiology visit is booked for Thursday'),
+    fact('transport', 'Sarah can take her on Thursday', { certainty: 'confirmed' }),
+    fact('question', 'Ask about the memory changes'),
+  ]
+  assert.equal(nextStep(facts)?.text, 'Update the medication list')
 })
 
 test('a stated goal wins over an inferred one', () => {

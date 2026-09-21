@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "start": "node --import tsx server/index.ts",
     "preview": "vite preview",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:ui": "npm run build --silent && node scripts/ui-functional-audit.mjs",
+    "rehearse": "node --import tsx scripts/rehearse.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",

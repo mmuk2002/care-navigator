@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowUpRight, MessageCircleMore, Plus, Search, Trash2 } from 'lucide-react'
 import type { Conversation } from '../../shared/types.js'
 import { api } from '../api'
 
@@ -24,15 +24,15 @@ export function Conversations({ onOpen, onStart, busy }: { onOpen: (id: string) 
   }
 
   return (
-    <section className="rise">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Conversations</h1>
+    <section className="rise mx-auto max-w-5xl">
+      <div className="flex flex-wrap items-end gap-3">
+        <div><p className="eyebrow text-teal">Your history</p><h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Conversations</h1><p className="mt-2 text-sm text-muted">Return to any conversation, transcript, or care detail.</p></div>
         <button onClick={onStart} disabled={busy} className="ml-auto inline-flex items-center gap-2 rounded-full bg-teal px-4 py-2 text-sm font-medium text-panel transition hover:brightness-110 disabled:opacity-60">
           <Plus size={16} /> New conversation
         </button>
       </div>
 
-      <label className="mt-4 flex items-center gap-2 rounded-full border border-line bg-panel px-4 py-2">
+      <label className="surface mt-6 flex items-center gap-2 rounded-2xl px-4 py-3">
         <Search size={16} className="text-muted" />
         <input
           value={query}
@@ -44,22 +44,22 @@ export function Conversations({ onOpen, onStart, busy }: { onOpen: (id: string) 
 
       <ul className="mt-4 space-y-2">
         {items.map(conversation => (
-          <li key={conversation.id} className="group flex items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3">
+          <li key={conversation.id} className="surface group flex items-center gap-4 rounded-2xl px-4 py-4 transition hover:-translate-y-0.5 hover:border-teal/30">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-teal-soft text-teal"><MessageCircleMore size={18}/></span>
             <button onClick={() => onOpen(conversation.id)} className="min-w-0 flex-1 text-left">
               <span className="block truncate text-sm font-medium">{conversation.title || 'Untitled conversation'}</span>
               <span className="block text-xs text-muted">
                 {new Date(conversation.started_at).toLocaleString()} · {conversation.status}
               </span>
             </button>
-            <button onClick={() => void remove(conversation.id)} title="Delete" className="text-muted transition hover:text-rose">
+            <ArrowUpRight size={16} className="text-muted transition group-hover:text-teal"/>
+            <button onClick={() => void remove(conversation.id)} title="Delete" className="rounded-lg p-2 text-muted transition hover:bg-rose-soft hover:text-rose">
               <Trash2 size={15} />
             </button>
           </li>
         ))}
         {!items.length && !loading && (
-          <li className="rounded-2xl border border-dashed border-line px-5 py-12 text-center text-sm text-muted">
-            {query ? 'Nothing matched that search.' : 'No conversations yet.'}
-          </li>
+          <li className="surface rounded-[28px] px-5 py-14 text-center"><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-teal-soft text-teal"><MessageCircleMore size={25}/></span><h2 className="mt-4 text-lg font-semibold">{query?'No matching conversations':'Your conversations will live here'}</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted">{query?'Try a different word or phrase.':'Start a voice conversation and Harbor will save the transcript, care views, and outcome automatically.'}</p></li>
         )}
       </ul>
     </section>

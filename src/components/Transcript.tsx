@@ -6,7 +6,7 @@ export function Transcript({ turns }: { turns: Turn[] }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <section className="rounded-3xl border border-line bg-panel p-5">
+    <section className="surface rounded-[26px] p-5">
       <button onClick={() => setOpen(value => !value)} className="flex w-full items-center justify-between">
         <span>
           <span className="block text-sm font-semibold">Full transcript</span>

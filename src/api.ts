@@ -1,4 +1,4 @@
-import type { Conversation, ConversationDetail, Fact, PatientProfile, Settings } from '../shared/types.js'
+import type { Conversation, ConversationDetail, Fact, PatientProfile, Settings, Turn } from '../shared/types.js'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -28,5 +28,6 @@ export const api = {
   endConversation: (id: string) => request<ConversationDetail>(`/api/conversations/${id}/end`, { method: 'POST' }),
   deleteConversation: (id: string) => request<{ removed: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   sendTurn: (id: string, text: string) => request<{ turn: unknown }>(`/api/conversations/${id}/turns`, { method: 'POST', body: JSON.stringify({ text }) }),
+  typedTurn: (id: string, text: string) => request<{ turn: Turn; reply: string }>(`/api/conversations/${id}/typed`, { method: 'POST', body: JSON.stringify({ text }) }),
   updateFact: (id: string, patch: { detail?: string; status?: Fact['status'] }) => request<Fact>(`/api/facts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 }

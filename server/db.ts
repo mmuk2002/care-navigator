@@ -33,8 +33,11 @@ CREATE TABLE IF NOT EXISTS turns (
   text text NOT NULL,
   seq integer NOT NULL,
   interrupted boolean NOT NULL DEFAULT false,
+  source_id text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE turns ADD COLUMN IF NOT EXISTS source_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS turns_source_idx ON turns(conversation_id, source_id) WHERE source_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS facts (
   id uuid PRIMARY KEY,
   conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -42,11 +45,17 @@ CREATE TABLE IF NOT EXISTS facts (
   title text NOT NULL,
   detail text NOT NULL,
   status text NOT NULL DEFAULT 'reported',
+  level text,
+  priority text,
+  certainty text NOT NULL DEFAULT 'reported',
   source_turn_id uuid,
   source_quote text,
   event_date text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE facts ADD COLUMN IF NOT EXISTS level text;
+ALTER TABLE facts ADD COLUMN IF NOT EXISTS priority text;
+ALTER TABLE facts ADD COLUMN IF NOT EXISTS certainty text NOT NULL DEFAULT 'reported';
 CREATE TABLE IF NOT EXISTS widget_states (
   conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   widget text NOT NULL,

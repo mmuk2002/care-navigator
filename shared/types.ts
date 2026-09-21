@@ -2,9 +2,18 @@
 // projections of one structured extraction rather than an intermediate layer.
 export const widgets = [
   'person', 'timeline', 'referral', 'appointment', 'transport', 'question',
-  'open_loop', 'concern', 'medication', 'decision', 'goal', 'next_step', 'provider',
+  'open_loop', 'attempt', 'concern', 'medication', 'decision', 'goal',
+  'next_step', 'provider', 'preference', 'readiness',
 ] as const
 export type Widget = typeof widgets[number]
+
+/** How strongly a provider/preference requirement was stated. */
+export type Level = 'required' | 'preferred' | 'nice_to_have'
+/** How much the person emphasized something (for the visit agenda). */
+export type Priority = 'high' | 'normal'
+/** Whether a fact is the patient's report or has been confirmed. */
+export type Certainty = 'reported' | 'confirmed' | 'needs_verification'
+export type FactStatus = 'reported' | 'completed' | 'corrected' | 'superseded'
 
 export type CareSubject = 'self' | 'other'
 export type Provider = 'gemini' | 'openai'
@@ -61,6 +70,8 @@ export interface Turn {
   text: string
   seq: number
   interrupted: boolean
+  /** Stable id for a streaming utterance, so partials update one row instead of appending. */
+  source_id: string | null
   created_at: string
 }
 
@@ -70,7 +81,10 @@ export interface Fact {
   widget: Widget
   title: string
   detail: string
-  status: 'reported' | 'completed' | 'corrected'
+  status: FactStatus
+  level: Level | null
+  priority: Priority | null
+  certainty: Certainty
   source_turn_id: string
   source_quote: string
   event_date: string | null
@@ -87,6 +101,8 @@ export interface ConversationDetail {
   conversation: Conversation
   turns: Turn[]
   facts: Fact[]
+  /** This patient's facts from earlier conversations, used for memory and conflicts. */
+  memory: Fact[]
   widgets: WidgetState[]
 }
 
@@ -95,6 +111,16 @@ export interface PatientProfile {
   conversation_count: number
   context: CareContext | null
   last_activity: string | null
+}
+
+/** A newer statement that contradicts an earlier one and needs the user's choice. */
+export interface Conflict {
+  widget: Widget
+  title: string
+  previous: string
+  next: string
+  previousId: string
+  nextId: string
 }
 
 export interface AppEvent {

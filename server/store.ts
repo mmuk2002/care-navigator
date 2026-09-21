@@ -1,10 +1,14 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import type { AppEvent, CareContext, Conversation, ConversationDetail, ConversationSummary, Fact, PatientProfile, Settings, Turn, Widget, WidgetState } from '../shared/types.js'
+import type { AppEvent, CareContext, Certainty, Conversation, ConversationDetail, ConversationSummary, Fact, Level, PatientProfile, Priority, Settings, Turn, Widget, WidgetState } from '../shared/types.js'
 import { widgets } from '../shared/types.js'
 import { normalizeSettings } from '../shared/settings.js'
 import type { Database } from './db.js'
 
-type FactInput = Omit<Fact, 'id' | 'created_at'>
+type FactInput = Omit<Fact, 'id' | 'created_at' | 'level' | 'priority' | 'certainty'> & {
+  level?: Level | null
+  priority?: Priority | null
+  certainty?: Certainty
+}
 
 export class Store {
   constructor(private db: Database, private publish: (event: AppEvent) => void) {}
@@ -106,12 +110,17 @@ export class Store {
   async detail(id: string, visitorId: string): Promise<ConversationDetail | null> {
     const conversation = await this.conversation(id, visitorId)
     if (!conversation) return null
-    const [turns, facts, widgetStates] = await Promise.all([
+    const [turns, facts, widgetStates, memory] = await Promise.all([
       this.db.query<Turn>('SELECT * FROM turns WHERE conversation_id=$1 ORDER BY seq', [id]),
       this.db.query<Fact>('SELECT * FROM facts WHERE conversation_id=$1 ORDER BY created_at', [id]),
       this.db.query<WidgetState>('SELECT widget,status,updated_at FROM widget_states WHERE conversation_id=$1', [id]),
+      this.db.query<Fact>(
+        `SELECT f.* FROM facts f JOIN conversations c ON c.id=f.conversation_id
+         WHERE c.visitor_id=$1 AND c.patient_key=$2 AND f.conversation_id <> $3
+           AND f.status NOT IN ('corrected','superseded')
+         ORDER BY f.created_at DESC`, [visitorId, conversation.patient_key, id]),
     ])
-    return { conversation, turns: turns.rows, facts: facts.rows, widgets: widgetStates.rows }
+    return { conversation, turns: turns.rows, facts: facts.rows, memory: memory.rows, widgets: widgetStates.rows }
   }
 
   async setStatus(id: string, status: Conversation['status']): Promise<void> {
@@ -138,6 +147,37 @@ export class Store {
     return turn
   }
 
+  /**
+   * Create or update one streaming utterance in place. Transcript partials reuse the
+   * same source id, so the transcript grows live instead of appearing all at once.
+   */
+  async upsertTurn(conversationId: string, sourceId: string, speaker: Turn['speaker'], text: string, interrupted = false): Promise<Turn> {
+    const existing = (await this.db.query<Turn>('SELECT * FROM turns WHERE conversation_id=$1 AND source_id=$2', [conversationId, sourceId])).rows[0]
+    if (existing) {
+      if (existing.text === text && existing.interrupted === interrupted) return existing
+      const updated = (await this.db.query<Turn>('UPDATE turns SET text=$3, interrupted=$4 WHERE id=$1 AND conversation_id=$2 RETURNING *',
+        [existing.id, conversationId, text, interrupted])).rows[0]
+      await this.event(conversationId, 'turn', updated)
+      return updated
+    }
+    const seq = (await this.db.query<{ next: number }>('SELECT COALESCE(max(seq),0)+1 AS next FROM turns WHERE conversation_id=$1', [conversationId])).rows[0]?.next || 1
+    const turn = (await this.db.query<Turn>('INSERT INTO turns(id,conversation_id,speaker,text,seq,interrupted,source_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [randomUUID(), conversationId, speaker, text, seq, interrupted, sourceId])).rows[0]
+    await this.event(conversationId, 'turn', turn)
+    return turn
+  }
+
+  /** Finalize a user utterance and enqueue its one extraction pass. */
+  async finalizeUserTurn(conversationId: string, sourceId: string, text: string): Promise<Turn> {
+    const turn = await this.upsertTurn(conversationId, sourceId, 'user', text)
+    await this.db.transaction(async query => {
+      await query('INSERT INTO analysis_jobs(id,conversation_id,turn_id) VALUES($1,$2,$3)', [randomUUID(), conversationId, turn.id])
+      for (const widget of widgets) await query("UPDATE widget_states SET status='working', updated_at=now() WHERE conversation_id=$1 AND widget=$2", [conversationId, widget])
+    })
+    for (const widget of widgets) await this.event(conversationId, 'widget', { widget, status: 'working' })
+    return turn
+  }
+
   async addUserTurn(conversationId: string, text: string): Promise<Turn> {
     const turn = await this.addTurn(conversationId, 'user', text)
     await this.db.transaction(async query => {
@@ -152,14 +192,6 @@ export class Store {
     return (await this.db.query<Fact>('SELECT * FROM facts WHERE conversation_id=$1 ORDER BY created_at', [conversationId])).rows
   }
 
-  async addFact(input: FactInput): Promise<Fact> {
-    const fact = (await this.db.query<Fact>(
-      'INSERT INTO facts(id,conversation_id,widget,title,detail,status,source_turn_id,source_quote,event_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [randomUUID(), input.conversation_id, input.widget, input.title, input.detail, input.status, input.source_turn_id, input.source_quote, input.event_date])).rows[0]
-    await this.event(input.conversation_id, 'fact', fact)
-    return fact
-  }
-
   /** Persist a turn's extracted facts atomically, then announce them. */
   async addFacts(inputs: FactInput[]): Promise<Fact[]> {
     if (!inputs.length) return []
@@ -167,8 +199,11 @@ export class Store {
       const rows: Fact[] = []
       for (const input of inputs) {
         const row = (await query<Fact>(
-          'INSERT INTO facts(id,conversation_id,widget,title,detail,status,source_turn_id,source_quote,event_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-          [randomUUID(), input.conversation_id, input.widget, input.title, input.detail, input.status, input.source_turn_id, input.source_quote, input.event_date])).rows[0]
+          `INSERT INTO facts(id,conversation_id,widget,title,detail,status,level,priority,certainty,source_turn_id,source_quote,event_date)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          [randomUUID(), input.conversation_id, input.widget, input.title, input.detail, input.status,
+            input.level || null, input.priority || null, input.certainty || 'reported',
+            input.source_turn_id, input.source_quote, input.event_date])).rows[0]
         rows.push(row)
       }
       return rows
@@ -177,11 +212,27 @@ export class Store {
     return saved
   }
 
-  async updateFact(id: string, visitorId: string, patch: { detail?: string; status?: Fact['status'] }): Promise<Fact | null> {
+  /** Mark facts as superseded, used when a newer statement replaces an older one. */
+  async supersedeFacts(ids: string[]): Promise<void> {
+    for (const id of ids) await this.db.query("UPDATE facts SET status='superseded' WHERE id=$1", [id])
+  }
+
+  /** Mark facts resolved, used when a later update closes a loop. */
+  async completeFacts(ids: string[]): Promise<void> {
+    for (const id of ids) await this.db.query("UPDATE facts SET status='completed' WHERE id=$1", [id])
+  }
+
+  /** Mark facts confirmed, used when a short reply settles something. */
+  async confirmFacts(ids: string[]): Promise<void> {
+    for (const id of ids) await this.db.query("UPDATE facts SET certainty='confirmed' WHERE id=$1", [id])
+  }
+
+  async updateFact(id: string, visitorId: string, patch: { detail?: string; status?: Fact['status']; certainty?: Certainty; priority?: Priority; level?: Level }): Promise<Fact | null> {
     const fact = (await this.db.query<Fact>(
-      `UPDATE facts f SET detail=COALESCE($3,f.detail), status=COALESCE($4,f.status)
+      `UPDATE facts f SET detail=COALESCE($3,f.detail), status=COALESCE($4,f.status), certainty=COALESCE($5,f.certainty),
+         priority=COALESCE($6,f.priority), level=COALESCE($7,f.level)
        FROM conversations c WHERE f.id=$1 AND c.id=f.conversation_id AND c.visitor_id=$2 RETURNING f.*`,
-      [id, visitorId, patch.detail || null, patch.status || null])).rows[0]
+      [id, visitorId, patch.detail || null, patch.status || null, patch.certainty || null, patch.priority || null, patch.level || null])).rows[0]
     if (fact) await this.event(fact.conversation_id, 'fact', fact)
     return fact || null
   }
@@ -206,7 +257,7 @@ export class Store {
   }
 
   async summary(conversationId: string): Promise<ConversationSummary> {
-    const facts = (await this.db.query<Fact>("SELECT * FROM facts WHERE conversation_id=$1 AND status <> 'corrected'", [conversationId])).rows
+    const facts = (await this.db.query<Fact>("SELECT * FROM facts WHERE conversation_id=$1 AND status NOT IN ('corrected','superseded')", [conversationId])).rows
     const titles = (widget: Widget) => facts.filter(fact => fact.widget === widget).map(fact => fact.detail)
     return {
       talked_about: [...new Set(facts.map(fact => fact.title))].slice(0, 8),

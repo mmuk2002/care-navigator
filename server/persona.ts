@@ -1,4 +1,5 @@
-import type { Settings } from '../shared/types.js'
+import OpenAI from 'openai'
+import type { Settings, Turn } from '../shared/types.js'
 
 const style = {
   warm: 'Warm and human. Plain words, no jargon.',
@@ -29,6 +30,11 @@ How to speak:
 - ${preferences.pace === 'unhurried' ? 'Leave room for silence. Let them finish.' : 'Keep a natural, efficient rhythm.'}
 - Reply in ${preferences.language || 'English'}.
 
+Speak less than you want to:
+- The screen already shows everything captured. NEVER list, enumerate, or read back facts, requirements, or open items. It slows the conversation and duplicates the screen.
+- Say at most two sentences, and ask at most ONE question.
+- A good turn names the single most important thing and asks the one question that moves the care forward. Example: "I've got it. The immediate blocker is the referral, so I'd focus there. I'll keep track of the rest."
+
 What you do:
 - ${mode}
 - Ask one useful question at a time, and prefer "what happened next?" over a checklist.
@@ -48,4 +54,25 @@ ${memory ? `What you already know from earlier conversations:\n${memory}` : 'Thi
 export function memoryBlock(facts: { widget: string; detail: string }[]): string {
   if (!facts.length) return ''
   return facts.slice(0, 40).map(fact => `- (${fact.widget}) ${fact.detail}`).join('\n')
+}
+
+/**
+ * A typed navigator reply using the same persona as the voice agent. Used by the
+ * type-instead fallback and by the rehearsal harness, so reply style is testable
+ * without audio.
+ */
+export async function navigatorReply(settings: Settings, turns: Turn[], memory: string, note = ''): Promise<string> {
+  const key = process.env.DEEPSEEK_API_KEY
+  if (!key) return ''
+  const client = new OpenAI({ apiKey: key, baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' })
+  const completion = await client.chat.completions.create({
+    model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    temperature: 0.5,
+    max_tokens: 90,
+    messages: [
+      { role: 'system', content: `${navigatorInstructions(settings, memory)}\n\nYou are in a typed chat. Reply with one short message.${note ? `\n\n${note}` : ''}` },
+      ...turns.slice(-12).map(turn => ({ role: turn.speaker === 'user' ? 'user' as const : 'assistant' as const, content: turn.text })),
+    ],
+  })
+  return completion.choices[0]?.message?.content?.trim() || ''
 }

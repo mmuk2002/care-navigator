@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { AppEvent, CareContext, Settings } from '../shared/types.js'
 import { normalizeSettings } from '../shared/settings.js'
-import { memoryBlock } from './persona.js'
+import { memoryBlock, navigatorReply } from './persona.js'
 import { openDatabase } from './db.js'
 import { Store } from './store.js'
 import { VoiceSession } from './gemini.js'
@@ -23,6 +23,8 @@ const listeners = new Map<string, Set<(event: AppEvent) => void>>()
 const publish = (event: AppEvent) => {
   for (const listener of listeners.get(event.conversation_id) || []) listener(event)
 }
+const sessions = new Map<WebSocket, VoiceSession>()
+const liveByConversation = new Map<string, VoiceSession>()
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined
@@ -36,7 +38,13 @@ function readCookie(header: string | undefined, name: string): string | undefine
 const database = await openDatabase()
 const store = new Store(database, publish)
 await store.recoverJobs()
-const worker = new AnalysisWorker(store)
+// When a preference contradicts an earlier one, the live navigator asks about it
+// rather than silently overwriting what the family told us before.
+const worker = new AnalysisWorker(store, (conversationId, conflict) => {
+  liveByConversation.get(conversationId)?.steer(
+    `You just noticed a conflict. Earlier they said: "${conflict.previous}". Now they said: "${conflict.next}". Ask them which to use going forward, in one short question. Do not list anything else.`,
+  )
+})
 worker.start()
 
 const app = Fastify({ logger: false, bodyLimit: 1_000_000 })
@@ -112,6 +120,29 @@ app.post('/api/conversations/:id/turns', async (request, reply) => {
   return { turn }
 })
 
+// Typed turn with a navigator reply. Used by the type-instead fallback and by the
+// rehearsal harness, so reply style can be exercised without a microphone.
+app.post('/api/conversations/:id/typed', async (request, reply) => {
+  const visitor = await requireVisitor(request.headers.cookie, reply)
+  if (!visitor) return
+  const id = (request.params as { id: string }).id
+  if (!(await store.conversation(id, visitor))) return reply.code(404).send({ error: 'not_found' })
+  const text = String((request.body as { text?: string })?.text || '').trim().slice(0, 4000)
+  if (!text) return reply.code(400).send({ error: 'empty' })
+  const profile = await store.profile(visitor)
+  await store.addUserTurn(id, text)
+  const detail = await store.detail(id, visitor)
+  if (!detail) return reply.code(404).send({ error: 'not_found' })
+  let replyText = ''
+  try {
+    replyText = await navigatorReply(detail.conversation.settings, detail.turns, memoryBlock(profile.facts))
+  } catch (error) {
+    console.warn('navigator reply failed', (error as Error).message)
+  }
+  if (replyText) await store.addTurn(id, 'assistant', replyText)
+  return { turn: detail.turns[detail.turns.length - 1], reply: replyText }
+})
+
 app.patch('/api/facts/:id', async (request, reply) => {
   const visitor = await requireVisitor(request.headers.cookie, reply)
   if (!visitor) return
@@ -161,7 +192,6 @@ app.get('/api/conversations/:id/events', async (request, reply) => {
 })
 
 const voiceWss = new WebSocketServer({ noServer: true })
-const sessions = new Map<WebSocket, VoiceSession>()
 
 app.server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url || '/', 'http://localhost')
@@ -179,7 +209,8 @@ voiceWss.on('connection', async (client, request) => {
   const profile = await store.profile(visitor)
   const session = new VoiceSession(store, () => worker.start())
   sessions.set(client, session)
-  client.on('close', () => { sessions.delete(client); void session.shutdown('client') })
+  liveByConversation.set(conversationId, session)
+  client.on('close', () => { sessions.delete(client); liveByConversation.delete(conversationId); void session.shutdown('client') })
   try {
     await session.connect(client, conversationId, detail.conversation.settings, memoryBlock(profile.facts))
   } catch (error) {

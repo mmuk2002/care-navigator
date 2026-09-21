@@ -31,6 +31,8 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [captions, setCaptions] = useState<Caption[]>([])
   const [notice, setNotice] = useState('')
+  const [muted, setMuted] = useState(false)
+  const mutedRef = useRef(false)
   const socket = useRef<WebSocket | null>(null)
   const input = useRef<AudioContext | null>(null)
   const output = useRef<AudioContext | null>(null)
@@ -97,7 +99,7 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
       socket.current = ws
 
       processor.onaudioprocess = event => {
-        if (ws.readyState !== WebSocket.OPEN) return
+        if (ws.readyState !== WebSocket.OPEN || mutedRef.current) return
         ws.send(toPcm16(event.inputBuffer.getChannelData(0), inputCtx.sampleRate))
       }
 
@@ -151,7 +153,12 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
     }
   }, [conversationId, stopAudio, teardown])
 
+  const toggleMute = useCallback(() => setMuted(current => {
+    mutedRef.current = !current
+    return !current
+  }), [])
+
   useEffect(() => () => { socket.current?.close(); teardown() }, [teardown])
 
-  return { status, captions, notice, start, stop, steer }
+  return { status, captions, notice, muted, toggleMute, start, stop, steer }
 }

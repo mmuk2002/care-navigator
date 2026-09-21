@@ -51,6 +51,8 @@ export class VoiceSession {
   private closing = false
   private userText = ''
   private assistantText = ''
+  private userIndex = 0
+  private assistantIndex = 0
   private assistantInterrupted = false
   private resumeHandle: string | null = null
   private resumeAttempts = 0
@@ -134,15 +136,19 @@ export class VoiceSession {
   }
 
   private async handleContent(content: ServerContent): Promise<void> {
+    // Transcript partials are persisted as they arrive, so the transcript grows
+    // live while the person is still speaking rather than appearing at the end.
     if (content.inputTranscription?.text) {
       this.userText = joinTranscript(this.userText, content.inputTranscription.text)
       this.send({ type: 'transcript', speaker: 'user', text: this.userText, final: false })
       this.send({ type: 'listening' })
+      await this.store.upsertTurn(this.conversationId, `gemini:user:${this.userIndex}`, 'user', this.userText)
     }
     if (content.outputTranscription?.text) {
       this.assistantText = joinTranscript(this.assistantText, content.outputTranscription.text)
       this.send({ type: 'transcript', speaker: 'assistant', text: this.assistantText, final: false })
       this.send({ type: 'speaking' })
+      await this.store.upsertTurn(this.conversationId, `gemini:assistant:${this.assistantIndex}`, 'assistant', this.assistantText)
     }
     for (const part of content.modelTurn?.parts || []) {
       if (part.inlineData?.data) this.send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' })
@@ -163,7 +169,8 @@ export class VoiceSession {
     const text = this.userText.trim()
     this.userText = ''
     if (!text) return
-    await this.store.addUserTurn(this.conversationId, text)
+    await this.store.finalizeUserTurn(this.conversationId, `gemini:user:${this.userIndex}`, text)
+    this.userIndex += 1
     this.onUserTurn()
   }
 
@@ -174,7 +181,8 @@ export class VoiceSession {
     this.assistantInterrupted = false
     if (!text) return
     this.send({ type: 'transcript', speaker: 'assistant', text, final: true })
-    await this.store.addTurn(this.conversationId, 'assistant', text, interrupted)
+    await this.store.upsertTurn(this.conversationId, `gemini:assistant:${this.assistantIndex}`, 'assistant', text, interrupted)
+    this.assistantIndex += 1
   }
 
   /** Apply a behavior change mid-session; Gemini Live accepts this as a non-turning user note. */

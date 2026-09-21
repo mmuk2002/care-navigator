@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, HeartHandshake, MessageCircle, SlidersHorizontal, UserRound } from 'lucide-react'
 import type { CareContext, Settings } from '../../shared/types.js'
 import { voiceOptions } from '../../shared/settings.js'
 import { api } from '../api'
@@ -32,13 +32,20 @@ export function SettingsPanel({ settings, onSave, onProfile }: {
   }
 
   return (
-    <section className="rise mx-auto max-w-3xl space-y-6">
+    <section className="rise mx-auto max-w-5xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="eyebrow text-teal">Make it yours</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Make Harbor feel like yours</h1>
         <p className="mt-1 text-sm text-muted">Who this is for, and how the navigator should talk with you.</p>
       </div>
 
-      <div className="rounded-3xl border border-line bg-panel p-5">
+      <div className="grid items-start gap-5 lg:grid-cols-[280px_1fr]">
+       <aside className="surface overflow-hidden rounded-[28px] lg:sticky lg:top-24">
+        <div className="bg-gradient-to-br from-[#194a42] to-teal p-6 text-white"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15"><HeartHandshake size={21}/></span><p className="mt-5 text-xs font-semibold uppercase tracking-[.14em] text-white/60">Live preview</p><h2 className="mt-2 text-xl font-semibold">Hi{draft.context.speaker_name?`, ${draft.context.speaker_name}`:''}.</h2><p className="mt-2 text-sm leading-relaxed text-white/72">I’ll speak in a {draft.preferences.tone}, {draft.preferences.pace} way and keep my answers {draft.preferences.verbosity}.</p></div>
+        <div className="space-y-3 p-5 text-xs text-muted"><p className="flex items-center gap-2"><UserRound size={14} className="text-plum"/>{draft.context.subject==='self'?'Navigating for you':`Navigating for ${draft.context.patient_name||'someone you care for'}`}</p><p className="flex items-center gap-2"><MessageCircle size={14} className="text-teal"/>{draft.preferences.language} · {draft.voice}</p><p className="flex items-center gap-2"><SlidersHorizontal size={14} className="text-amber"/>{modes.find(([value])=>value===draft.preferences.mode)?.[1]}</p></div>
+       </aside>
+       <div className="space-y-5">
+      <div className="surface rounded-[28px] p-5 sm:p-6">
         <h2 className="text-sm font-semibold">Who are we navigating for?</h2>
         <div className="mt-3 flex gap-2">
           {([['self', 'Myself'], ['other', 'Someone I care for']] as const).map(([value, label]) => (
@@ -62,7 +69,7 @@ export function SettingsPanel({ settings, onSave, onProfile }: {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-line bg-panel p-5">
+      <div className="surface rounded-[28px] p-5 sm:p-6">
         <h2 className="text-sm font-semibold">How should Harbor talk with you?</h2>
         <Choice label="Mode" options={modes} value={draft.preferences.mode} onChange={value => setPreference('mode', value)} />
         <Choice label="Tone" options={tones} value={draft.preferences.tone} onChange={value => setPreference('tone', value)} />
@@ -88,11 +95,13 @@ export function SettingsPanel({ settings, onSave, onProfile }: {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <button onClick={() => void save()} className="inline-flex items-center gap-2 rounded-full bg-teal px-5 py-2.5 text-sm font-medium text-panel transition hover:brightness-110">
           {saved ? <><Check size={16} /> Saved</> : 'Save settings'}
         </button>
         <p className="text-xs text-muted">Changing mode or tone mid-conversation applies to the rest of the call.</p>
+      </div>
+       </div>
       </div>
     </section>
   )
