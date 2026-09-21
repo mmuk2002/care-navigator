@@ -1,4 +1,7 @@
-import { mkdir, rename } from 'node:fs/promises'
+import { access, mkdir, rename } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const exists = (path: string) => access(path).then(() => true, () => false)
 import { PGlite } from '@electric-sql/pglite'
 import { Pool } from 'pg'
 
@@ -93,6 +96,21 @@ async function local(): Promise<Database> {
   const dir = process.env.DATA_DIR || './data'
   await mkdir(dir, { recursive: true }).catch(() => undefined)
 
+  // PGlite removes postmaster.pid on a clean close, so a leftover file means the
+  // previous process was killed. Opening such a directory aborts the WASM runtime
+  // and takes the whole process down before any catch can run, so check for the
+  // marker first and set the directory aside. `npm run db:reset` does this on demand.
+  const moveAside = async (reason: string) => {
+    const backup = `${dir}.corrupt-${Date.now()}`
+    await rename(dir, backup).catch(() => undefined)
+    await mkdir(dir, { recursive: true }).catch(() => undefined)
+    console.warn(`${reason} Its database was moved to ${backup} and a fresh one created.`)
+  }
+
+  if (await exists(join(dir, 'postmaster.pid'))) {
+    await moveAside('The previous run did not shut down cleanly.')
+  }
+
   const open = async () => {
     const instance = new PGlite(dir)
     // Touch the database so a corrupt directory fails here rather than later.
@@ -104,14 +122,8 @@ async function local(): Promise<Database> {
   try {
     db = await open()
   } catch {
-    // A force-killed process can leave the embedded database unreadable. Move it
-    // aside and start clean instead of refusing to boot. Run `npm run db:reset`
-    // to do this deliberately.
-    const backup = `${dir}.corrupt-${Date.now()}`
-    await rename(dir, backup).catch(() => undefined)
-    await mkdir(dir, { recursive: true }).catch(() => undefined)
+    await moveAside('The local database was unreadable.')
     db = await open()
-    console.warn(`The local database was unreadable. It has been moved to ${backup} and a fresh one created.`)
   }
 
   const query: Query = async (sql, params) => { const result = await db.query(sql, params); return { rows: result.rows as never[] } }

@@ -80,20 +80,23 @@ export class VoiceSession {
     this.send({ type: 'ready' })
 
     client.on('message', (raw, binary) => {
-      const upstream = this.upstream
-      if (upstream?.readyState !== WebSocket.OPEN) return
-      if (binary) {
-        const audio = Buffer.from(raw as Buffer)
-        if (audio.length > 64_000) return
-        upstream.send(JSON.stringify({ realtimeInput: { audio: { data: audio.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
+      if (!binary) {
+        // Control frames are handled even if the upstream socket has already gone,
+        // so a stop still commits the transcript and closes the session cleanly.
+        try {
+          const control = JSON.parse(raw.toString()) as { type?: string }
+          if (control.type === 'stop') { this.requestStop(); return }
+          if (control.type === 'audioStreamEnd' && this.upstream?.readyState === WebSocket.OPEN) {
+            this.upstream.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }))
+          }
+        } catch { /* ignore unknown control frames */ }
         return
       }
-      try {
-        const control = JSON.parse(raw.toString()) as { type?: string; directive?: string }
-        if (control.type === 'audioStreamEnd') upstream.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }))
-        if (control.type === 'steer' && typeof control.directive === 'string') this.steer(control.directive.slice(0, 600))
-        if (control.type === 'stop') this.requestStop()
-      } catch { /* ignore unknown control frames */ }
+      const upstream = this.upstream
+      if (upstream?.readyState !== WebSocket.OPEN) return
+      const audio = Buffer.from(raw as Buffer)
+      if (audio.length > 64_000) return
+      upstream.send(JSON.stringify({ realtimeInput: { audio: { data: audio.toString('base64'), mimeType: 'audio/pcm;rate=16000' } } }))
     })
     client.on('close', () => { if (!this.closing) void this.shutdown('client') })
     this.lifetime = setTimeout(() => void this.shutdown('expired'), 10 * 60 * 1000)

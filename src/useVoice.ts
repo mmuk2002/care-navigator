@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { captureWorkletSource } from './audioWorklet'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'closed' | 'error'
 
@@ -39,7 +40,11 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
   const input = useRef<AudioContext | null>(null)
   const output = useRef<AudioContext | null>(null)
   const mic = useRef<MediaStream | null>(null)
-  const node = useRef<ScriptProcessorNode | null>(null)
+  const sourceNode = useRef<MediaStreamAudioSourceNode | null>(null)
+  const node = useRef<AudioNode | null>(null)
+  const workletUrl = useRef<string | null>(null)
+  const captureWatchdog = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastInputFrame = useRef(0)
   const playhead = useRef(0)
   const sources = useRef<AudioBufferSourceNode[]>([])
   const saved = useRef(onSavedTurn)
@@ -55,8 +60,14 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
     audioReady.current = false
     if (closeFallback.current) clearTimeout(closeFallback.current)
     closeFallback.current = null
+    if (captureWatchdog.current) clearInterval(captureWatchdog.current)
+    captureWatchdog.current = null
     node.current?.disconnect()
     node.current = null
+    sourceNode.current?.disconnect()
+    sourceNode.current = null
+    if (workletUrl.current) URL.revokeObjectURL(workletUrl.current)
+    workletUrl.current = null
     mic.current?.getTracks().forEach(track => track.stop())
     mic.current = null
     void input.current?.close().catch(() => {})
@@ -98,13 +109,9 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
       const inputCtx = new AudioContext()
       input.current = inputCtx
       const source = inputCtx.createMediaStreamSource(stream)
-      const processor = inputCtx.createScriptProcessor(4096, 1, 1)
-      node.current = processor
+      sourceNode.current = source
       const sink = inputCtx.createGain()
       sink.gain.value = 0
-      source.connect(processor)
-      processor.connect(sink)
-      sink.connect(inputCtx.destination)
 
       const outputCtx = new AudioContext()
       output.current = outputCtx
@@ -119,10 +126,53 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
       ws.binaryType = 'arraybuffer'
       socket.current = ws
 
-      processor.onaudioprocess = event => {
+      const sendInput = (samples: Float32Array) => {
+        lastInputFrame.current = Date.now()
         if (ws.readyState !== WebSocket.OPEN || !audioReady.current || mutedRef.current) return
-        ws.send(toPcm16(event.inputBuffer.getChannelData(0), inputCtx.sampleRate))
+        ws.send(toPcm16(samples, inputCtx.sampleRate))
       }
+
+      // AudioWorklet runs on the browser's audio-rendering thread and remains
+      // reliable during long sessions. ScriptProcessor is only a compatibility
+      // fallback for older browsers.
+      try {
+        const url = URL.createObjectURL(new Blob([captureWorkletSource], { type: 'text/javascript' }))
+        workletUrl.current = url
+        await inputCtx.audioWorklet.addModule(url)
+        const worklet = new AudioWorkletNode(inputCtx, 'harbor-pcm-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+        worklet.port.onmessage = event => sendInput(event.data as Float32Array)
+        node.current = worklet
+      } catch {
+        const processor = inputCtx.createScriptProcessor(4096, 1, 1)
+        processor.onaudioprocess = event => sendInput(event.inputBuffer.getChannelData(0))
+        node.current = processor
+      }
+      source.connect(node.current)
+      node.current.connect(sink)
+      sink.connect(inputCtx.destination)
+      lastInputFrame.current = Date.now()
+
+      for (const track of stream.getAudioTracks()) {
+        track.onended = () => {
+          if (!audioReady.current) return
+          audioReady.current = false
+          setStatus('error')
+          setNotice('The microphone disconnected. Start the conversation again to reconnect it.')
+          ws.close()
+        }
+        track.onmute = () => setNotice('The microphone is temporarily paused by the browser or audio device.')
+        track.onunmute = () => setNotice('')
+      }
+      captureWatchdog.current = setInterval(() => {
+        if (!audioReady.current || mutedRef.current) return
+        if (Date.now() - lastInputFrame.current < 3000) return
+        if (inputCtx.state === 'suspended') {
+          void inputCtx.resume().catch(() => setNotice('The browser paused the microphone. Select Resume to continue.'))
+        } else {
+          setNotice('The microphone stopped sending audio. End and restart the conversation to reconnect it.')
+          setStatus('error')
+        }
+      }, 1500)
 
       ws.onmessage = event => {
         if (typeof event.data !== 'string') return

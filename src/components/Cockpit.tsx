@@ -18,6 +18,19 @@ const derivedLabels: Record<string, string> = {
   blockers: 'Blocked', possible_update: 'Possible update', changes: 'What changed today',
 }
 
+/** An empty card for a widget the person added before anything has been captured. */
+function placeholderCard(kind: string): CareCard {
+  const meta = (cardMeta as Record<string, { title: string; subtitle: string }>)[kind]
+  return {
+    kind,
+    title: meta?.title || derivedLabels[kind] || kind,
+    subtitle: meta?.subtitle || 'Added by you. It will fill in as you talk.',
+    status: 'Nothing captured yet',
+    items: [],
+    derived: !meta,
+  }
+}
+
 function loadConfig(): CockpitConfig {
   try {
     const raw = JSON.parse(localStorage.getItem(configKey) || '{}') as Partial<CockpitConfig>
@@ -44,10 +57,17 @@ export function Cockpit({ facts, memory = [], conversationId, onChanged, onDelet
 
   const { mode, pinned, hidden } = config
   const cards = useMemo(() => careCards(facts, conversationId, memory), [facts, conversationId, memory])
-  const visible = useMemo(
-    () => (mode === 'recommended' ? cards : cards.filter(card => pinned.includes(card.kind) || !hidden.includes(card.kind))),
-    [cards, mode, pinned, hidden],
-  )
+  const visible = useMemo(() => {
+    if (mode === 'recommended') return cards
+    const shown = cards.filter(card => pinned.includes(card.kind) || !hidden.includes(card.kind))
+    // A pinned widget with nothing captured yet still has to appear, otherwise
+    // adding it looks like it did nothing.
+    const present = new Set(shown.map(card => card.kind))
+    const placeholders = pinned
+      .filter(kind => !present.has(kind))
+      .map(kind => placeholderCard(kind))
+    return [...shown, ...placeholders]
+  }, [cards, mode, pinned, hidden])
   const ordered = useMemo(() => {
     const isPinned = (card: CareCard) => pinned.includes(card.kind)
     return [...visible.filter(isPinned), ...visible.filter(card => !isPinned(card))]
@@ -153,6 +173,11 @@ function Card({ card, pinned, onPin, onChanged, onDeleted }: {
           <FactRow key={fact.id} fact={fact} onChanged={onChanged} onDeleted={onDeleted} />
         ))}
       </ul>
+      {!card.items.length && !card.checklist && !card.conflict && !card.note && (
+        <p className="mt-3 rounded-2xl border border-dashed border-line px-3 py-6 text-center text-xs text-muted">
+          Nothing captured yet. This view fills in as you talk.
+        </p>
+      )}
     </article>
   )
 }

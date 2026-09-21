@@ -412,10 +412,18 @@ export class AnalysisWorker {
 
     // Only keep facts whose quote (or verbatim detail) actually appears in the conversation.
     const haystack = normalize(detail.turns.map(turn => turn.text).join(' '))
+    const debug = process.env.DEBUG_ANALYSIS === '1'
+    if (debug) console.log(`analysis[debug]: turn=${JSON.stringify(latest.text)} extracted=${extracted.length} existing=${detail.facts.length}`)
     const accepted: ExtractedFact[] = []
     for (const fact of extracted) {
-      if (!hasEvidence(fact, haystack)) continue
-      if (isDuplicate(fact, detail.facts) || isDuplicate(fact, accepted)) continue
+      if (!hasEvidence(fact, haystack)) {
+        if (debug) console.log(`  drop(no-evidence) [${fact.widget}] ${fact.detail} :: quote=${JSON.stringify(fact.quote)}`)
+        continue
+      }
+      if (isDuplicate(fact, detail.facts) || isDuplicate(fact, accepted)) {
+        if (debug) console.log(`  drop(duplicate)   [${fact.widget}] ${fact.detail}`)
+        continue
+      }
       accepted.push(fact)
     }
     // Safety net: if the model gave us nothing usable, mine the turn with rules.
