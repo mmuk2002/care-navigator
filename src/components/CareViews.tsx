@@ -13,12 +13,23 @@ export function CareViews({ view, profile, onChanged, onOpen }: { view: View; pr
 
 const active = (facts:Fact[]) => facts.filter(f=>f.status!=='corrected'&&f.status!=='superseded')
 
+/** Collapse facts that say the same thing in slightly different ways. */
+const uniqueByDetail = (facts:Fact[]) => [...new Map(facts.map(f=>[f.detail.toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim(), f])).values()]
+
+/** A referral that has actually landed is no longer something we are waiting on. */
+const referralReceived = (f:Fact) => f.widget==='referral'
+  && /\b(received|came through|got (?:it|the))\b/i.test(f.detail)
+  && !/\b(not received|never got|never received|didn't receive|hasn't arrived)\b/i.test(f.detail)
+
 function PageHeading({kicker,title,accent,description,icon}:{kicker:string;title:string;accent:string;description:string;icon:React.ReactNode}) {
   return <div className="care-page-heading"><span className="care-page-icon">{icon}</span><div><p className="eyebrow text-teal">{kicker}</p><h1>{title}<br/><em>{accent}</em></h1><p>{description}</p></div></div>
 }
 
 function Tasks({facts,onChanged,onOpen}:{facts:Fact[];onChanged:()=>Promise<void>;onOpen:(id:string)=>void}) {
-  const rows=active(facts); const mine=rows.filter(f=>['next_step','readiness','transport'].includes(f.widget)&&f.status!=='completed'); const waiting=rows.filter(f=>['open_loop','referral'].includes(f.widget)&&f.status!=='completed'); const done=rows.filter(f=>f.status==='completed')
+  const rows=active(facts)
+  const mine=uniqueByDetail(rows.filter(f=>(['next_step','readiness'].includes(f.widget)||(f.widget==='transport'&&f.certainty!=='confirmed'))&&f.status!=='completed'))
+  const waiting=uniqueByDetail(rows.filter(f=>(f.widget==='open_loop'||(f.widget==='referral'&&!referralReceived(f)))&&f.status!=='completed'))
+  const done=uniqueByDetail(rows.filter(f=>f.status==='completed'))
   const complete=async(fact:Fact)=>{await api.updateFact(fact.id,{status:'completed'});await onChanged()}
   return <main className="care-page rise"><PageHeading kicker="Tasks & open loops" title="What needs" accent="moving forward?" description="Keep your next actions separate from the things another person or office needs to resolve." icon={<CheckCircle2/>}/><div className="task-columns"><TaskSection title="Your next steps" subtitle="Actions you can move forward" facts={mine} empty="No next steps captured yet." onComplete={complete} onOpen={onOpen}/><TaskSection title="Waiting on" subtitle="Other people and care offices" facts={waiting} empty="Nothing is waiting on someone else." onComplete={complete} onOpen={onOpen}/></div>{done.length>0&&<section className="surface mt-5 rounded-[26px] p-5"><p className="eyebrow">Recently completed</p><div className="mt-3 flex flex-wrap gap-2">{done.slice(0,8).map(f=><button onClick={()=>onOpen(f.conversation_id)} key={f.id} className="rounded-full bg-teal-soft px-3 py-1.5 text-xs text-teal">✓ {f.title}</button>)}</div></section>}</main>
 }
