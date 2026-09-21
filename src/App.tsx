@@ -17,6 +17,7 @@ export default function App() {
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [sourceTurn, setSourceTurn] = useState<string | null>(null)
   const detailRef = useRef<ConversationDetail | null>(null)
   const refreshSequence = useRef(0)
   detailRef.current = detail
@@ -25,25 +26,29 @@ export default function App() {
     api.bootstrap().then(setBoot).catch(() => setError('Could not reach the server. Is it running?'))
   }, [])
 
+  // Use a functional update: this runs right after a settings save, and spreading
+  // a captured `boot` would write back the pre-save settings.
   const refreshProfile = useCallback(async () => {
-    if (!boot) return
     const profile = await api.profile()
-    setBoot({ ...boot, profile })
-  }, [boot])
+    setBoot(current => (current ? { ...current, profile } : current))
+  }, [])
 
   const start = useCallback(async () => {
     setBusy(true); setError('')
     try {
       const created = await api.createConversation()
       setDetail(created)
+      setSourceTurn(null)
       setView('session')
     } catch { setError('Could not start a conversation.') } finally { setBusy(false) }
   }, [])
 
-  const open = useCallback(async (id: string) => {
+  // `turnId` jumps straight to the line a fact came from, instead of the top of the thread.
+  const open = useCallback(async (id: string, turnId?: string) => {
     setBusy(true); setError('')
     try {
       setDetail(await api.conversation(id))
+      setSourceTurn(turnId || null)
       setView('session')
     } catch { setError('Could not open that conversation.') } finally { setBusy(false) }
   }, [])
@@ -128,7 +133,7 @@ export default function App() {
           <Conversations onOpen={open} onStart={start} busy={busy} />
         )}
         {view === 'memory' && (
-          <MemoryPanel onChanged={refreshProfile} />
+          <MemoryPanel onChanged={refreshProfile} onOpen={open} />
         )}
         {view === 'settings' && (
           <SettingsPanel settings={boot.settings} onSave={saveSettings} onProfile={refreshProfile} />
@@ -137,7 +142,7 @@ export default function App() {
           <CareViews view={view} profile={boot.profile} onChanged={refreshProfile} onOpen={open} />
         )}
         {view === 'session' && detail && (
-          <Session detail={detail} onRefresh={refresh} onEnd={end} onExit={() => { setView('home'); void refreshProfile() }} />
+          <Session detail={detail} highlightTurnId={sourceTurn} onRefresh={refresh} onEnd={end} onExit={() => { setView('home'); void refreshProfile() }} />
         )}
       </main>
     </div>

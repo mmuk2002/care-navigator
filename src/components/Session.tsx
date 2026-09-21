@@ -9,8 +9,9 @@ import { LiveTranscript } from './LiveTranscript'
 import { Cockpit } from './Cockpit'
 import { Insights } from './Insights'
 
-export function Session({ detail, onRefresh, onEnd, onExit }: {
+export function Session({ detail, highlightTurnId, onRefresh, onEnd, onExit }: {
   detail: ConversationDetail
+  highlightTurnId?: string | null
   onRefresh: () => Promise<void>
   onEnd: () => Promise<void>
   onExit: () => void
@@ -96,7 +97,7 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
         <div className="mb-5"><p className="eyebrow text-teal">Saved conversation</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">Review the details and their source</h2><p className="mt-1 text-sm text-muted">Everything below remains editable after the conversation ends.</p></div>
         <div className="grid items-start gap-5 xl:grid-cols-[1fr_360px]">
           <Cockpit facts={facts} memory={detail.memory} conversationId={conversation.id} onChanged={scheduleRefresh} onDeleted={removeFact}/>
-          <div className="space-y-4"><LiveTranscript turns={turns} live={false} navigatorName={navigatorName} /><Insights widgets={widgets} facts={facts}/></div>
+          <div className="space-y-4"><LiveTranscript turns={turns} live={false} navigatorName={navigatorName} highlightId={highlightTurnId} /><Insights widgets={widgets} facts={facts}/></div>
         </div>
       </section>
     </div>
@@ -127,7 +128,7 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
 
         <CallBar voice={voice} conversation={conversation} navigatorName={navigatorName} onTyped={sendTyped} onEnd={onEnd} />
 
-        <LiveTranscript turns={turns} live={live} navigatorName={navigatorName} liveUser={voice.liveUser} liveAssistant={voice.liveAssistant} />
+        <LiveTranscript turns={turns} live={live} navigatorName={navigatorName} liveUser={voice.liveUser} liveAssistant={voice.liveAssistant} highlightId={highlightTurnId} />
       </div>
 
       <div className="min-w-0 space-y-5">

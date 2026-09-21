@@ -68,6 +68,7 @@ button,input,select{font:inherit} button{cursor:pointer} button:focus-visible,in
 .transcript-list{min-height:300px;max-height:60vh;overflow-y:auto;border-top:1px solid var(--color-line);padding-top:10px;scroll-behavior:smooth}
 .transcript-turn{display:flex;gap:11px;padding:11px 8px;border-radius:12px;margin:2px 0}
 .transcript-turn.live{background:#f4faf6}
+.transcript-turn.highlighted{background:#fff7e9;box-shadow:inset 3px 0 #dda762}
 .turn-avatar{width:30px;height:30px;border-radius:9px;flex:0 0 30px;display:grid;place-items:center;background:#e6f2ed;color:#3d8577}
 .transcript-turn.assistant .turn-avatar{background:#f5ebdf;color:#a97f5c}
 .turn-content{min-width:0;flex:1}

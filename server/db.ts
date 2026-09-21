@@ -1,7 +1,4 @@
-import { access, mkdir, rename } from 'node:fs/promises'
-import { join } from 'node:path'
-
-const exists = (path: string) => access(path).then(() => true, () => false)
+import { mkdir, rename } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import { Pool } from 'pg'
 
@@ -96,19 +93,11 @@ async function local(): Promise<Database> {
   const dir = process.env.DATA_DIR || './data'
   await mkdir(dir, { recursive: true }).catch(() => undefined)
 
-  // PGlite removes postmaster.pid on a clean close, so a leftover file means the
-  // previous process was killed. Opening such a directory aborts the WASM runtime
-  // and takes the whole process down before any catch can run, so check for the
-  // marker first and set the directory aside. `npm run db:reset` does this on demand.
   const moveAside = async (reason: string) => {
     const backup = `${dir}.corrupt-${Date.now()}`
     await rename(dir, backup).catch(() => undefined)
     await mkdir(dir, { recursive: true }).catch(() => undefined)
     console.warn(`${reason} Its database was moved to ${backup} and a fresh one created.`)
-  }
-
-  if (await exists(join(dir, 'postmaster.pid'))) {
-    await moveAside('The previous run did not shut down cleanly.')
   }
 
   const open = async () => {
@@ -118,6 +107,11 @@ async function local(): Promise<Database> {
     return instance
   }
 
+  // Only reset when opening actually fails. Never reset just because a lock file
+  // exists: a dev watcher restart leaves one behind, and moving the directory then
+  // would throw away a healthy database on every reload. A genuinely corrupt
+  // directory aborts the WASM runtime before this catch runs, which is why the
+  // `npm run dev` wrapper runs a preflight in a child process instead.
   let db: PGlite
   try {
     db = await open()

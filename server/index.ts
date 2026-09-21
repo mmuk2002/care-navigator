@@ -62,6 +62,17 @@ app.addContentTypeParser('*', { parseAs: 'string' }, lenientParser)
 
 app.get('/api/health', async () => ({ ok: true, database: process.env.DATABASE_URL ? 'postgres' : 'pglite' }))
 
+// Temporary local diagnostic: shows how visitors, conversations, and facts line up.
+app.get('/api/debug/state', async request => {
+  const visitorId = (request.query as { visitor?: string }).visitor
+  return {
+    visitors: (await database.query('SELECT visitor_id, context FROM visitor_profiles')).rows,
+    conversations: (await database.query('SELECT id, visitor_id, patient_key, status FROM conversations ORDER BY started_at')).rows,
+    facts: (await database.query('SELECT conversation_id, widget, status, count(*)::int AS n FROM facts GROUP BY conversation_id, widget, status ORDER BY conversation_id')).rows,
+    profile: visitorId ? await store.profile(visitorId) : undefined,
+  }
+})
+
 app.post('/api/bootstrap', async (request, reply) => {
   const token = readCookie(request.headers.cookie, 'visitor')
   const visitor = await store.visitor(token)

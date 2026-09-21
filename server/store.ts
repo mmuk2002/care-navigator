@@ -57,11 +57,25 @@ export class Store {
   async profile(visitorId: string): Promise<PatientProfile> {
     const context = (await this.db.query<{ context: CareContext | null }>('SELECT context FROM visitor_profiles WHERE visitor_id=$1', [visitorId])).rows[0]?.context || null
     const patientKey = this.patientKey(context)
-    const facts = (await this.db.query<Fact>(
+
+    const factsFor = async (key: string) => (await this.db.query<Fact>(
       `SELECT f.* FROM facts f JOIN conversations c ON c.id=f.conversation_id
-       WHERE c.visitor_id=$1 AND c.patient_key=$2 AND f.status <> 'corrected' ORDER BY f.created_at DESC`, [visitorId, patientKey])).rows
-    const stats = (await this.db.query<{ count: string; last_activity: string | null }>(
-      'SELECT count(*)::text AS count, max(COALESCE(ended_at, started_at)) AS last_activity FROM conversations WHERE visitor_id=$1 AND patient_key=$2', [visitorId, patientKey])).rows[0]
+       WHERE c.visitor_id=$1 AND c.patient_key=$2 AND f.status NOT IN ('corrected','superseded')
+       ORDER BY f.created_at DESC`, [visitorId, key])).rows
+    const statsFor = async (key: string | null) => (await this.db.query<{ count: string; last_activity: string | null }>(
+      `SELECT count(*)::text AS count, max(COALESCE(ended_at, started_at)) AS last_activity FROM conversations
+       WHERE visitor_id=$1${key ? ' AND patient_key=$2' : ''}`, key ? [visitorId, key] : [visitorId])).rows[0]
+
+    // Facts are scoped to the current care context, but a conversation can be
+    // recorded before the context is set (or after it changes). Falling back to
+    // everything this visitor has keeps their care thread visible instead of
+    // showing empty screens because of a key mismatch.
+    const scoped = await factsFor(patientKey)
+    const facts = scoped.length ? scoped : (await this.db.query<Fact>(
+      `SELECT f.* FROM facts f JOIN conversations c ON c.id=f.conversation_id
+       WHERE c.visitor_id=$1 AND f.status NOT IN ('corrected','superseded')
+       ORDER BY f.created_at DESC`, [visitorId])).rows
+    const stats = await statsFor(scoped.length ? patientKey : null)
     return { facts, conversation_count: Number(stats?.count || 0), context, last_activity: stats?.last_activity || null }
   }
 

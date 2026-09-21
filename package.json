@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch server/index.ts",
+    "dev": "node --import tsx scripts/dev.ts",
     "build": "tsc --noEmit && vite build",
     "start": "node --import tsx server/index.ts",
     "preview": "vite preview",

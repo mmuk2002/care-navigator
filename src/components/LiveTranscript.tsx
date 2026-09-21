@@ -8,12 +8,14 @@ import { lastTurnText, pendingLive } from '../../shared/transcript.js'
  * utterance is rendered straight from the socket so words appear as they are
  * spoken. `pendingLive` drops the overlap with the turn already saved.
  */
-export function LiveTranscript({ turns, live, navigatorName, liveUser = '', liveAssistant = '' }: {
+export function LiveTranscript({ turns, live, navigatorName, liveUser = '', liveAssistant = '', highlightId = null }: {
   turns: Turn[]
   live: boolean
   navigatorName: string
   liveUser?: string
   liveAssistant?: string
+  /** The line a fact came from, scrolled to and highlighted when arriving from a source link. */
+  highlightId?: string | null
 }) {
   const list = useRef<HTMLDivElement>(null)
 
@@ -23,8 +25,12 @@ export function LiveTranscript({ turns, live, navigatorName, liveUser = '', live
 
   useEffect(() => {
     const element = list.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [turns, pendingUser, pendingAssistant])
+    if (!element) return
+    // Jump to the cited line when we arrived from a source link, otherwise follow the tail.
+    const target = highlightId ? element.querySelector<HTMLElement>(`#turn-${CSS.escape(highlightId)}`) : null
+    if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    else element.scrollTop = element.scrollHeight
+  }, [turns, pendingUser, pendingAssistant, highlightId])
 
   return (
     <section className="transcript-panel">
@@ -40,8 +46,9 @@ export function LiveTranscript({ turns, live, navigatorName, liveUser = '', live
       <div className="transcript-list scroll-subtle" ref={list} role="log" aria-label="Conversation transcript" aria-live="off">
         {turns.length ? turns.map((turn, index) => {
           const active = live && !hasPending && index === turns.length - 1
+          const highlighted = turn.id === highlightId
           return (
-            <article key={turn.id} className={`transcript-turn ${turn.speaker} ${active ? 'live' : ''}`}>
+            <article id={`turn-${turn.id}`} key={turn.id} className={`transcript-turn ${turn.speaker} ${active ? 'live' : ''} ${highlighted ? 'highlighted' : ''}`}>
               <div className="turn-avatar">{turn.speaker === 'user' ? <Users size={15} /> : <AudioLines size={15} />}</div>
               <div className="turn-content">
                 <div className="turn-meta">
