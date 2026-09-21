@@ -144,6 +144,12 @@ export class VoiceSession {
       this.send({ type: 'listening' })
       await this.store.upsertTurn(this.conversationId, `gemini:user:${this.userIndex}`, 'user', this.userText)
     }
+    // Finalize as soon as the input transcription says it is done, so the turn
+    // cannot be truncated by a late turnComplete.
+    if (content.inputTranscription?.finished && this.userText.trim()) {
+      this.send({ type: 'transcript', speaker: 'user', text: this.userText, final: true })
+      await this.commitUser()
+    }
     if (content.outputTranscription?.text) {
       this.assistantText = joinTranscript(this.assistantText, content.outputTranscription.text)
       this.send({ type: 'transcript', speaker: 'assistant', text: this.assistantText, final: false })

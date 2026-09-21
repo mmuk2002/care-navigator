@@ -84,6 +84,9 @@ await visit('Conversations', 'Conversations', [
   ['conversation row renders', 'text=Maria'],
 ])
 
+console.log('--- global ---')
+check('no "Invalid Date" labels anywhere', (await page.getByText('Invalid Date').count()) === 0)
+
 console.log(`\nRESULT: ${passed} passed, ${failed} failed`)
 console.log(errors.length ? `CONSOLE ERRORS:\n${errors.join('\n')}` : 'OK no console errors')
 await browser.close()

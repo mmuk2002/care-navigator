@@ -1,23 +1,30 @@
 import { useEffect, useRef } from 'react'
 import { AudioLines, Users } from 'lucide-react'
 import type { Turn } from '../../shared/types.js'
+import { lastTurnText, pendingLive } from '../../shared/transcript.js'
 
 /**
- * The live transcript. Partial turns are persisted as they stream, so this list
- * grows while the person is still speaking, with a cursor on the active turn.
+ * The live transcript. Saved turns come from the store, and the in-progress
+ * utterance is rendered straight from the socket so words appear as they are
+ * spoken. `pendingLive` drops the overlap with the turn already saved.
  */
-export function LiveTranscript({ turns, live, navigatorName, snippets }: {
+export function LiveTranscript({ turns, live, navigatorName, liveUser = '', liveAssistant = '' }: {
   turns: Turn[]
   live: boolean
   navigatorName: string
-  snippets: string[]
+  liveUser?: string
+  liveAssistant?: string
 }) {
   const list = useRef<HTMLDivElement>(null)
+
+  const pendingUser = pendingLive(liveUser, lastTurnText(turns, 'user'))
+  const pendingAssistant = pendingLive(liveAssistant, lastTurnText(turns, 'assistant'))
+  const hasPending = Boolean(pendingUser || pendingAssistant)
 
   useEffect(() => {
     const element = list.current
     if (element) element.scrollTop = element.scrollHeight
-  }, [turns, snippets])
+  }, [turns, pendingUser, pendingAssistant])
 
   return (
     <section className="transcript-panel">
@@ -30,17 +37,9 @@ export function LiveTranscript({ turns, live, navigatorName, snippets }: {
       </div>
       <p className="transcript-intro">Words appear here as they are spoken. Every detail on the right links back to something said.</p>
 
-      {snippets.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {snippets.slice(0, 4).map((snippet, index) => (
-            <span key={index} className="rounded-full bg-teal-soft px-2.5 py-1 text-[11px] text-teal">{snippet}</span>
-          ))}
-        </div>
-      )}
-
       <div className="transcript-list scroll-subtle" ref={list} role="log" aria-label="Conversation transcript" aria-live="off">
         {turns.length ? turns.map((turn, index) => {
-          const active = live && index === turns.length - 1
+          const active = live && !hasPending && index === turns.length - 1
           return (
             <article key={turn.id} className={`transcript-turn ${turn.speaker} ${active ? 'live' : ''}`}>
               <div className="turn-avatar">{turn.speaker === 'user' ? <Users size={15} /> : <AudioLines size={15} />}</div>
@@ -54,13 +53,31 @@ export function LiveTranscript({ turns, live, navigatorName, snippets }: {
               </div>
             </article>
           )
-        }) : (
+        }) : (!pendingUser && !pendingAssistant) && (
           <div className="transcript-empty">
             <AudioLines size={26} className="mx-auto mb-2 opacity-60" />
             <p>The transcript will build here as you talk.</p>
           </div>
         )}
+
+        {pendingUser && <PendingTurn speaker="user" text={pendingUser} navigatorName={navigatorName} />}
+        {pendingAssistant && <PendingTurn speaker="assistant" text={pendingAssistant} navigatorName={navigatorName} />}
       </div>
     </section>
+  )
+}
+
+function PendingTurn({ speaker, text, navigatorName }: { speaker: 'user' | 'assistant'; text: string; navigatorName: string }) {
+  return (
+    <article className={`transcript-turn ${speaker} live`}>
+      <div className="turn-avatar">{speaker === 'user' ? <Users size={15} /> : <AudioLines size={15} />}</div>
+      <div className="turn-content">
+        <div className="turn-meta">
+          <strong>{speaker === 'user' ? 'You' : navigatorName}</strong>
+          <span>Now</span>
+        </div>
+        <p>{text}<i className="live-cursor" aria-hidden="true" /></p>
+      </div>
+    </article>
   )
 }

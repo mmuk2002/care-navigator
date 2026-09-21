@@ -77,6 +77,27 @@ function weekdayOf(fact: Fact): string | null {
   return match ? DAYS.find(day => day.toLowerCase() === match[1].toLowerCase()) || null : null
 }
 
+/** Two appointments for the same day and time are one visit, however they were phrased. */
+function appointmentKey(fact: Fact): string {
+  const day = weekdayOf(fact) || ''
+  const time = (textOf(fact).match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i)?.[0] || '').toLowerCase()
+  if (day || time) return `${day}|${time}`
+  return fact.detail.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function dedupeAppointments(facts: Fact[]): Fact[] {
+  const seen = new Map<string, Fact>()
+  for (const fact of newest(facts)) {
+    const key = appointmentKey(fact)
+    if (!seen.has(key)) seen.set(key, fact)
+  }
+  return [...seen.values()]
+}
+
+const uniqueDetails = (values: string[]): string[] => [
+  ...new Map(values.map(value => [value.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(), value])).values(),
+]
+
 /** The next navigation step, resolved in priority order. */
 export function nextStep(facts: Fact[]): { text: string; fact: Fact } | null {
   const care = active(facts)
@@ -297,8 +318,8 @@ export function accomplishments(facts: Fact[]): Accomplishments {
   ]
   return {
     resolved,
-    scheduled: care.filter(fact => fact.widget === 'appointment').map(fact => fact.detail),
-    prepared: care.filter(fact => fact.widget === 'concern' || fact.widget === 'question').map(fact => fact.detail),
+    scheduled: uniqueDetails(dedupeAppointments(care.filter(fact => fact.widget === 'appointment')).map(fact => fact.detail)).slice(0, 3),
+    prepared: uniqueDetails(care.filter(fact => fact.widget === 'concern' || fact.widget === 'question').map(fact => fact.detail)).slice(0, 6),
     stillToDo: [
       ...care.filter(fact => fact.widget === 'readiness').map(fact => fact.detail),
       ...readinessChecklist(care).filter(row => row.state === 'needed').map(row => pendingAction(row)),
@@ -339,7 +360,7 @@ export function careCards(facts: Fact[], conversationId: string, memory: Fact[] 
 
   const appointment = byWidget(care, 'appointment')[0]
   if (appointment) {
-    cards.push({ kind: 'upcoming', ...cardMeta.appointment, title: 'Upcoming care', items: byWidget(care, 'appointment').slice(0, 3) })
+    cards.push({ kind: 'upcoming', ...cardMeta.appointment, title: 'Upcoming care', items: dedupeAppointments(care.filter(fact => fact.widget === 'appointment')).slice(0, 2) })
     const readiness = readinessChecklist(care)
     cards.push({
       kind: 'readiness', title: 'Appointment readiness', subtitle: 'What still needs to happen before the visit.',

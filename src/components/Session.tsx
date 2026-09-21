@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarCheck, CheckCircle2, Clock3, Sparkles, Target, Undo2, X } from 'lucide-react'
 import type { ConversationDetail, Fact, Settings } from '../../shared/types.js'
-import { accomplishments, careGoal, nextStep, snippetFor } from '../../shared/cockpit.js'
+import { accomplishments, careGoal, nextStep } from '../../shared/cockpit.js'
 import { api } from '../api'
 import { useVoice } from '../useVoice'
 import { CallBar } from './CallBar'
@@ -22,9 +22,14 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
   const [deleted, setDeleted] = useState<Fact | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Throttle, not debounce: partial transcripts arrive faster than any debounce
+  // window, so a trailing timer would starve and only fire once speaking stopped.
   const scheduleRefresh = useCallback(() => {
-    if (refreshTimer.current) clearTimeout(refreshTimer.current)
-    refreshTimer.current = setTimeout(() => void onRefresh(), 250)
+    if (refreshTimer.current) return
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null
+      void onRefresh()
+    }, 400)
   }, [onRefresh])
 
   useEffect(() => {
@@ -49,11 +54,6 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
   const step = useMemo(() => nextStep(facts), [facts])
   const patient = conversation.settings.context
   const navigatorName = conversation.settings.preferences.agentName || 'Harbor'
-  const snippets = useMemo(() => [...facts]
-    .filter(fact => fact.status !== 'corrected' && fact.status !== 'superseded')
-    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-    .slice(0, 4)
-    .map(snippetFor), [facts])
 
   const changeGoal = async () => {
     const text = goalDraft.trim()
@@ -96,7 +96,7 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
         <div className="mb-5"><p className="eyebrow text-teal">Saved conversation</p><h2 className="mt-2 text-2xl font-semibold tracking-tight">Review the details and their source</h2><p className="mt-1 text-sm text-muted">Everything below remains editable after the conversation ends.</p></div>
         <div className="grid items-start gap-5 xl:grid-cols-[1fr_360px]">
           <Cockpit facts={facts} memory={detail.memory} conversationId={conversation.id} onChanged={scheduleRefresh} onDeleted={removeFact}/>
-          <div className="space-y-4"><LiveTranscript turns={turns} live={false} navigatorName={navigatorName} snippets={snippets} /><Insights widgets={widgets} facts={facts}/></div>
+          <div className="space-y-4"><LiveTranscript turns={turns} live={false} navigatorName={navigatorName} /><Insights widgets={widgets} facts={facts}/></div>
         </div>
       </section>
     </div>
@@ -127,7 +127,7 @@ export function Session({ detail, onRefresh, onEnd, onExit }: {
 
         <CallBar voice={voice} conversation={conversation} navigatorName={navigatorName} onTyped={sendTyped} onEnd={onEnd} />
 
-        <LiveTranscript turns={turns} live={live} navigatorName={navigatorName} snippets={snippets} />
+        <LiveTranscript turns={turns} live={live} navigatorName={navigatorName} liveUser={voice.liveUser} liveAssistant={voice.liveAssistant} />
       </div>
 
       <div className="min-w-0 space-y-5">

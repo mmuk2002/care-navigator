@@ -57,6 +57,8 @@ Disambiguation:
 - A scheduling preference (mornings, afternoons, evenings) is "preference", NOT "appointment", even when the sentence contains the word "appointment".
 - A referral is "referral"; the specialty being referred to is a "person".
 - Something the person is trying to accomplish is a "goal", not a "referral".
+- "decision" is ONLY for a choice made or an option ruled out. Booking or arranging a visit is "appointment" or "next_step", never "decision".
+- Do not emit a second fact for a visit already described in the transcript. One visit is one appointment fact.
 
 Self-correction:
 - If the speaker corrects themselves within the turn (for example "two months - actually, no, more like three weeks"), return ONLY the corrected value and ignore the retracted one.
@@ -68,7 +70,7 @@ Rules:
 - Each fact is ONE atomic detail, not a whole sentence. "detail" must be a short phrase of 12 words or fewer in the person's own words, with no clinical rewriting.
 - "title" is a short 2-5 word label.
 - "quote" MUST be an exact, character-for-character span copied from the transcript. Do not paraphrase, fix grammar, or merge two sentences.
-- Include "event_date" only when a date or weekday is explicitly stated, else null.
+- Include "event_date" only when a date or weekday is explicitly stated, else null. Use an ISO date (YYYY-MM-DD) when the date is unambiguous; otherwise copy the phrase exactly as stated (for example "Friday next week"). Never invent a date.
 - Never invent details, never claim anything was verified, and never add advice.
 - Return only the widgets that are relevant to this turn. An empty list is correct when nothing new is worth saving.
 - Prefer a small number of high-signal facts over many trivial ones. Split a sentence into separate facts when it carries separate details.`

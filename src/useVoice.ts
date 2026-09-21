@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'closed' | 'error'
 
@@ -163,7 +163,12 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
     return !current
   }), [])
 
+  // The in-progress utterance, straight from the socket, so the transcript can
+  // show words as they are spoken without waiting for a database round-trip.
+  const liveUser = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'user' && !caption.final)?.text || '', [captions])
+  const liveAssistant = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'assistant' && !caption.final)?.text || '', [captions])
+
   useEffect(() => () => { socket.current?.close(); teardown() }, [teardown])
 
-  return { status, captions, notice, muted, toggleMute, start, stop, steer }
+  return { status, captions, notice, muted, toggleMute, liveUser, liveAssistant, start, stop, steer }
 }
