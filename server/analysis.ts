@@ -362,7 +362,9 @@ export class AnalysisWorker {
 
   start(): void {
     if (this.timer) return
-    this.timer = setInterval(() => void this.drain(), 700)
+    // Poll often: this is the delay between a turn finishing and its facts
+    // appearing, and the work itself is dominated by the model call.
+    this.timer = setInterval(() => void this.drain(), 250)
   }
 
   stop(): void {

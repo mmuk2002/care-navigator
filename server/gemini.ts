@@ -153,14 +153,16 @@ export class VoiceSession {
       this.send({ type: 'transcript', speaker: 'user', text: this.interimUserText, final: false })
       this.send({ type: 'listening' })
     }
-    // Keep the authoritative text buffered until the speech turn closes. Database
-    // writes and extraction must never delay the model's first response audio.
     if (content.inputTranscription?.text) {
       this.userText = joinTranscript(this.userText, content.inputTranscription.text)
       this.interimUserText = ''
       const final = Boolean(content.inputTranscription.finished)
       this.send({ type: 'transcript', speaker: 'user', text: this.userText, final })
       this.send({ type: 'listening' })
+      // The person has stopped speaking. Enqueue the extraction now so the widgets
+      // update while the navigator is still replying, instead of waiting for
+      // turnComplete, which only arrives after its audio response is finished.
+      if (final) await this.commitUser()
     }
     if (content.outputTranscription?.text) {
       this.assistantText = joinTranscript(this.assistantText, content.outputTranscription.text)
@@ -170,6 +172,10 @@ export class VoiceSession {
     for (const part of content.modelTurn?.parts || []) {
       if (part.inlineData?.data) this.send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/pcm;rate=24000' })
     }
+    // Fallback for a turn that never flags the end of input: once the navigator
+    // starts answering, the person's turn is over.
+    const navigatorStarted = Boolean(content.outputTranscription?.text) || (content.modelTurn?.parts || []).some(part => part.inlineData?.data)
+    if (navigatorStarted && this.userText.trim()) await this.commitUser()
     if (content.interrupted) {
       this.assistantInterrupted = true
       this.send({ type: 'interrupted' })
