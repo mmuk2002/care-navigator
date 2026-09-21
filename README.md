@@ -1,5 +1,8 @@
 # Harbor — a voice care navigator
 
+**Live:** https://harbor-production-11ad.up.railway.app
+**Repo:** https://github.com/mmuk2002/care-navigator
+
 Harbor is a voice-first web app that helps a patient or family caregiver find their way through the
 practical side of care: referrals, appointments, insurance questions, transportation, and what to ask a
 professional. It is explicitly **non-clinical** — it never diagnoses, never interprets symptoms, and never
