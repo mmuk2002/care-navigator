@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rename } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import { Pool } from 'pg'
 
@@ -92,7 +92,28 @@ async function postgres(url: string): Promise<Database> {
 async function local(): Promise<Database> {
   const dir = process.env.DATA_DIR || './data'
   await mkdir(dir, { recursive: true }).catch(() => undefined)
-  const db = new PGlite(dir)
+
+  const open = async () => {
+    const instance = new PGlite(dir)
+    // Touch the database so a corrupt directory fails here rather than later.
+    await instance.query('SELECT 1')
+    return instance
+  }
+
+  let db: PGlite
+  try {
+    db = await open()
+  } catch {
+    // A force-killed process can leave the embedded database unreadable. Move it
+    // aside and start clean instead of refusing to boot. Run `npm run db:reset`
+    // to do this deliberately.
+    const backup = `${dir}.corrupt-${Date.now()}`
+    await rename(dir, backup).catch(() => undefined)
+    await mkdir(dir, { recursive: true }).catch(() => undefined)
+    db = await open()
+    console.warn(`The local database was unreadable. It has been moved to ${backup} and a fresh one created.`)
+  }
+
   const query: Query = async (sql, params) => { const result = await db.query(sql, params); return { rows: result.rows as never[] } }
   return {
     query,

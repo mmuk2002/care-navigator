@@ -6,3 +6,4 @@ data
 artifacts
 beats
 data-ui-audit
+data.corrupt-*

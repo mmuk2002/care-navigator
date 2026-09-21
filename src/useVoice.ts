@@ -34,6 +34,8 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
   const [muted, setMuted] = useState(false)
   const mutedRef = useRef(false)
   const socket = useRef<WebSocket | null>(null)
+  const audioReady = useRef(false)
+  const closeFallback = useRef<ReturnType<typeof setTimeout> | null>(null)
   const input = useRef<AudioContext | null>(null)
   const output = useRef<AudioContext | null>(null)
   const mic = useRef<MediaStream | null>(null)
@@ -50,6 +52,9 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
   }, [])
 
   const teardown = useCallback(() => {
+    audioReady.current = false
+    if (closeFallback.current) clearTimeout(closeFallback.current)
+    closeFallback.current = null
     node.current?.disconnect()
     node.current = null
     mic.current?.getTracks().forEach(track => track.stop())
@@ -61,11 +66,19 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
   }, [])
 
   const stop = useCallback(() => {
-    socket.current?.close()
-    socket.current = null
+    const ws = socket.current
+    audioReady.current = false
+    stopAudio()
     teardown()
     setStatus('closed')
-  }, [teardown])
+    if (ws?.readyState === WebSocket.OPEN) {
+      // Let Gemini finish the active transcript before the server closes the session.
+      ws.send(JSON.stringify({ type: 'stop' }))
+      closeFallback.current = setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close()
+      }, 2500)
+    } else ws?.close()
+  }, [stopAudio, teardown])
 
   const steer = useCallback((directive: string) => {
     if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'steer', directive }))
@@ -76,6 +89,9 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
     setStatus('connecting')
     setNotice('')
     setCaptions([])
+    mutedRef.current = false
+    setMuted(false)
+    audioReady.current = false
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
       mic.current = stream
@@ -104,15 +120,16 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
       socket.current = ws
 
       processor.onaudioprocess = event => {
-        if (ws.readyState !== WebSocket.OPEN || mutedRef.current) return
+        if (ws.readyState !== WebSocket.OPEN || !audioReady.current || mutedRef.current) return
         ws.send(toPcm16(event.inputBuffer.getChannelData(0), inputCtx.sampleRate))
       }
 
       ws.onmessage = event => {
         if (typeof event.data !== 'string') return
-        const message = JSON.parse(event.data) as { type: string; speaker?: 'user' | 'assistant'; text?: string; final?: boolean; data?: string; message?: string; reason?: string }
+        let message: { type: string; speaker?: 'user' | 'assistant'; text?: string; final?: boolean; data?: string; message?: string; reason?: string }
+        try { message = JSON.parse(event.data) } catch { return }
         switch (message.type) {
-          case 'ready': setStatus('listening'); break
+          case 'ready': audioReady.current = true; setStatus('listening'); break
           case 'listening': setStatus('listening'); break
           case 'speaking': setStatus('speaking'); break
           case 'interrupted': stopAudio(); setStatus('listening'); break
@@ -145,12 +162,16 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
             break
           }
           case 'notice': setNotice(message.message || ''); break
-          case 'error': setStatus('error'); setNotice(message.message || 'Voice failed'); break
-          case 'closed': setStatus('closed'); break
+          case 'error': audioReady.current = false; setStatus('error'); setNotice(message.message || 'Voice failed'); break
+          case 'closed': audioReady.current = false; setStatus('closed'); break
         }
       }
-      ws.onerror = () => { setStatus('error'); setNotice('The voice connection dropped.') }
-      ws.onclose = () => { teardown(); setStatus(current => (current === 'error' ? current : 'closed')) }
+      ws.onerror = () => { audioReady.current = false; setStatus('error'); setNotice('The voice connection dropped.') }
+      ws.onclose = () => {
+        if (socket.current === ws) socket.current = null
+        teardown()
+        setStatus(current => (current === 'error' ? current : 'closed'))
+      }
     } catch (error) {
       teardown()
       setStatus('error')
@@ -165,8 +186,11 @@ export function useVoice(conversationId: string | null, onSavedTurn: () => void)
 
   // The in-progress utterance, straight from the socket, so the transcript can
   // show words as they are spoken without waiting for a database round-trip.
-  const liveUser = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'user' && !caption.final)?.text || '', [captions])
-  const liveAssistant = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'assistant' && !caption.final)?.text || '', [captions])
+  // Keep the newest socket caption visible even after it becomes final. The
+  // transcript component removes it only after the matching persisted turn
+  // arrives, avoiding a flash back to an older database snapshot.
+  const liveUser = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'user')?.text || '', [captions])
+  const liveAssistant = useMemo(() => [...captions].reverse().find(caption => caption.speaker === 'assistant')?.text || '', [captions])
 
   useEffect(() => () => { socket.current?.close(); teardown() }, [teardown])
 

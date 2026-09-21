@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Check, ChevronDown, GitMerge, LayoutGrid, Loader2, Quote, ScanText, Sparkles } from 'lucide-react'
 import type { Fact, WidgetState } from '../../shared/types.js'
-import { snippetFor } from '../../shared/cockpit.js'
 import { widgetDot, widgetLabel } from '../widgets'
 
 /**
@@ -19,11 +18,6 @@ export function Insights({ widgets: states, facts }: { widgets: WidgetState[]; f
     for (const fact of saved) map.set(fact.widget, (map.get(fact.widget) || 0) + 1)
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [saved])
-
-  const feed = useMemo(
-    () => [...saved].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 8),
-    [saved],
-  )
 
   return (
     <section className="surface rounded-[26px] p-5">
@@ -56,25 +50,18 @@ export function Insights({ widgets: states, facts }: { widgets: WidgetState[]; f
             <Pipeline icon={<GitMerge size={13}/>} label="Reconcile" detail="Duplicates & conflicts" working={working}/>
             <Pipeline icon={<LayoutGrid size={13}/>} label="Project" detail="Live care views" working={working}/>
           </div>
-          {counts.length > 0 && (
+          {counts.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {counts.map(([widget, count]) => (
-                <span key={widget} className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">
+                <span key={widget} className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11px] text-muted">
                   <span className={`h-1.5 w-1.5 rounded-full ${widgetDot(widget as never)}`} />
                   {widgetLabel(widget as never)} · {count}
                 </span>
               ))}
             </div>
+          ) : (
+            <p className="mt-3 rounded-2xl border border-dashed border-line py-4 text-center text-xs text-muted">Nothing captured yet.</p>
           )}
-
-          <ul className="mt-3 space-y-1.5">
-            {feed.map(fact => (
-              <li key={fact.id} className="rise truncate text-xs text-muted" title={fact.detail}>
-                {snippetFor(fact)}
-              </li>
-            ))}
-            {!feed.length && <li className="py-4 text-center text-xs text-muted">Nothing captured yet.</li>}
-          </ul>
         </>
       )}
     </section>

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:ui": "npm run build --silent && node scripts/ui-functional-audit.mjs",
-    "rehearse": "node --import tsx scripts/rehearse.ts"
+    "rehearse": "node --import tsx scripts/rehearse.ts",
+    "db:reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\""
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",

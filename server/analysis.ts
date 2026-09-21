@@ -51,12 +51,18 @@ For every fact also provide:
 - priority: "high" when the person stresses that it matters most, otherwise "normal".
 - certainty: "confirmed" when they say it is already settled, "needs_verification" for external claims that cannot be checked (for example "she has Medicare"), otherwise "reported".
 
+Whose words count:
+- Extract ONLY from the person (the speaker, labelled with their name). The Navigator's lines are context for understanding, never a source of facts.
+- Never turn the Navigator's questions, suggestions, or explanations into facts.
+
 Disambiguation:
 - A named clinician, clinic, or family member is a "person", not a "provider".
-- "provider" is only for criteria used to choose a provider.
+- "provider" is only for criteria used to choose a provider. Medicare, Medicaid, and insurance are "provider" criteria, NEVER "medication".
+- "medication" is only a medicine, prescription, refill, dose, or pharmacy detail.
 - A scheduling preference (mornings, afternoons, evenings) is "preference", NOT "appointment", even when the sentence contains the word "appointment".
 - A referral is "referral"; the specialty being referred to is a "person".
 - Something the person is trying to accomplish is a "goal", not a "referral".
+- "question" is something they plan to ask a clinician, office, or pharmacy. A question they are asking the Navigator for advice or a recommendation is NOT a fact at all.
 - "decision" is ONLY for a choice made or an option ruled out. Booking or arranging a visit is "appointment" or "next_step", never "decision".
 - Do not emit a second fact for a visit already described in the transcript. One visit is one appointment fact.
 

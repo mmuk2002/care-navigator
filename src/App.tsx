@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarDays, CheckCircle2, HeartHandshake, LayoutGrid, MessageSquareText, Settings as SettingsIcon, ShieldCheck } from 'lucide-react'
 import type { ConversationDetail, Settings } from '../shared/types.js'
 import { api, type Bootstrap } from './api'
@@ -17,6 +17,9 @@ export default function App() {
   const [detail, setDetail] = useState<ConversationDetail | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const detailRef = useRef<ConversationDetail | null>(null)
+  const refreshSequence = useRef(0)
+  detailRef.current = detail
 
   useEffect(() => {
     api.bootstrap().then(setBoot).catch(() => setError('Could not reach the server. Is it running?'))
@@ -46,9 +49,16 @@ export default function App() {
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!detail) return
-    try { setDetail(await api.conversation(detail.conversation.id)) } catch { /* keep last view */ }
-  }, [detail])
+    const id = detailRef.current?.conversation.id
+    if (!id) return
+    const sequence = ++refreshSequence.current
+    try {
+      const next = await api.conversation(id)
+      // Rapid SSE events can overlap. Never let an older response overwrite a
+      // newer transcript, or update a conversation the user has since left.
+      if (sequence === refreshSequence.current && detailRef.current?.conversation.id === id) setDetail(next)
+    } catch { /* keep last view */ }
+  }, [])
 
   const saveSettings = useCallback(async (settings: Settings) => {
     const saved = await api.saveSettings(settings)
